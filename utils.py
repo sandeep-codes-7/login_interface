@@ -1,10 +1,10 @@
-
 from passlib.context import CryptContext
 from jose import jwt, JWTError
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 
 
 ACCESS_TOKEN_EXPIRY_MINUTES = 5
+REFRESH_TOKEN_EXPIRY_DAYS = 7
 ALGORITHM = "HS256"
 SECRET = "59e24ba4af94c0128330fc11f1b78874ef0a8ed6f1a10510b0ff989d013dd28b"
 
@@ -16,18 +16,48 @@ def generateHashPassword(password: str):
     return pwd_context.hash(password)
 
 def verifyHashPassword(plain_password: str, hashed_password: str):
-    return pwd_context.verify(plain_password,hashed_password)
+    return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expiry_delta: timedelta = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRY_MINUTES)
-    to_encode.update({"exp":expire})
-    encoded_jwt = jwt.encode(to_encode,SECRET,ALGORITHM)
+    if expiry_delta:
+        expire = datetime.now(timezone.utc) + expiry_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRY_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET, ALGORITHM)
+    return encoded_jwt
+
+def create_refresh_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRY_DAYS)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET, ALGORITHM)
     return encoded_jwt
 
 def decode_access_token(token: str):
     try:
-        payload = jwt.decode(token=token,key=SECRET,algorithms=ALGORITHM)
+        payload = jwt.decode(token=token, key=SECRET, algorithms=[ALGORITHM])
         return payload
     except JWTError:
         return None
+
+def decode_refresh_token(token: str):
+    try:
+        payload = jwt.decode(token=token, key=SECRET, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+
+def refresh_access_token(refresh_token: str):
+    """Generate a new access token from a refresh token"""
+    payload = decode_refresh_token(refresh_token)
+    if payload is None:
+        return None
+    
+    username = payload.get("sub")
+    if username is None:
+        return None
+    
+    new_access_token = create_access_token(data={"sub": username})
+    return new_access_token

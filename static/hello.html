@@ -1,1 +1,256 @@
-<h1>login first</h1>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+        }
+
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .user-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+
+        .logout-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .logout-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .error {
+            color: #721c24;
+            background: #f8d7da;
+            padding: 12px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+
+        .error a {
+            color: #721c24;
+            font-weight: bold;
+            text-decoration: underline;
+        }
+
+        .token-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Welcome!</h1>
+        <div id="content">
+            <p>Loading...</p>
+        </div>
+        <div id="read">
+            <button onclick="read()">Read me</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8000";
+        let refreshTokenInterval = null;
+
+        // Decode JWT to get expiration time
+        function decodeToken(token) {
+            try {
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+                return JSON.parse(jsonPayload);
+            } catch (err) {
+                console.error("Error decoding token:", err);
+                return null;
+            }
+        }
+
+        // Get time until token expires (in milliseconds)
+        function getTimeUntilExpiry(token) {
+            const decoded = decodeToken(token);
+            if (!decoded || !decoded.exp) return null;
+            const expiryTime = decoded.exp * 1000; // Convert to milliseconds
+            const now = Date.now();
+            return expiryTime - now;
+        }
+
+        // Refresh access token
+        async function refreshAccessToken() {
+            const refreshToken = localStorage.getItem("refresh_token");
+            if (!refreshToken) {
+                console.log("No refresh token found");
+                return false;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/refresh`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ refresh_token: refreshToken }),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    localStorage.setItem("token", data.access_token);
+                    console.log("Access token refreshed successfully");
+                    scheduleTokenRefresh(data.access_token);
+                    return true;
+                } else {
+                    console.error("Failed to refresh token");
+                    logout();
+                    return false;
+                }
+            } catch (err) {
+                console.error("Error refreshing token:", err);
+                logout();
+                return false;
+            }
+        }
+
+        // Schedule automatic token refresh
+        function scheduleTokenRefresh(token) {
+            // Clear existing interval
+            if (refreshTokenInterval) {
+                clearInterval(refreshTokenInterval);
+            }
+
+            const timeUntilExpiry = getTimeUntilExpiry(token);
+            if (!timeUntilExpiry || timeUntilExpiry <= 0) {
+                console.log("Token already expired");
+                logout();
+                return;
+            }
+
+            // Refresh token 30 seconds before it expires
+            const refreshTime = Math.max(timeUntilExpiry - 30000, 0);
+            console.log(`Token will refresh in ${(refreshTime / 1000).toFixed(0)} seconds`);
+
+            refreshTokenInterval = setTimeout(() => {
+                console.log("Refreshing token...");
+                refreshAccessToken();
+            }, refreshTime);
+        }
+
+        async function loadUserData() {
+            const token = localStorage.getItem("token");
+            const refreshToken = localStorage.getItem("refresh_token");
+
+            if (!token || !refreshToken) {
+                document.getElementById("content").innerHTML = '<div class="error">No token found. Please <a href="/">login</a></div>';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/user/me`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`
+                    }
+                });
+
+                console.log("Response status:", response.status);
+
+                if (response.ok) {
+                    const user = await response.json();
+                    console.log("User data:", user);
+
+                    // Schedule token refresh
+                    scheduleTokenRefresh(token);
+
+                    // document.getElementById("content").innerHTML = `
+                    //     <div class="user-info">
+                    //         <h2>Hello, ${user.username}!</h2>
+                    //         <p>User ID: ${user.id}</p>
+                    //         <div class="token-info">
+                    //             <p>Token will auto-refresh on expiration</p>
+                    //         </div>
+                    //     </div>
+                    //     <button class="logout-btn" onclick="logout()">Logout</button>
+                    // `;
+                } else if (response.status === 401) {
+                    // Token expired, try to refresh
+                    console.log("Token expired, attempting refresh...");
+                    const refreshed = await refreshAccessToken();
+                    if (refreshed) {
+                        // Retry loading user data
+                        loadUserData();
+                    }
+                } else {
+                    document.getElementById("content").innerHTML = `<div class="error">Error (${response.status}). Please <a href="/">login</a> again</div>`;
+                    localStorage.removeItem("token");
+                }
+            } catch (err) {
+                console.error("Fetch error:", err);
+                document.getElementById("content").innerHTML = `<div class="error">Error: ${err.message}</div>`;
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem("token");
+            localStorage.removeItem("refresh_token");
+            if (refreshTokenInterval) {
+                clearInterval(refreshTokenInterval);
+            }
+            window.location.href = "/";
+        }
+
+
+        async function read(){
+            window.location.href = `${API_URL}/user/me`;
+        }
+
+
+        // Load user data when page loads
+        window.addEventListener('load', loadUserData);
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (refreshTokenInterval) {
+                clearInterval(refreshTokenInterval);
+            }
+        });
+    </script>
+</body>
+
+</html>
